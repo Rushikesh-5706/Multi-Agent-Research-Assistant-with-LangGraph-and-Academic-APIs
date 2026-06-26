@@ -13,6 +13,12 @@ from src.agents.supervisor_agent import SupervisorAgent
 from src.models.schemas import WorkflowState
 from src.state.redis_manager import RedisManager
 
+# Canonical display names for paper sources
+_SOURCE_LABELS: dict[str, str] = {
+    "arxiv": "arXiv",
+    "semantic_scholar": "Semantic Scholar",
+}
+
 
 class GraphState(TypedDict):
     run_id: str
@@ -36,24 +42,38 @@ def build_workflow(redis_manager: RedisManager):
 
     def search_node(state: GraphState) -> dict:
         logger.info("Search Agent: Retrieving papers from arXiv and Semantic Scholar")
-        ws = redis_manager.load_state(state["run_id"])
-        ws = search.search(ws)
-        redis_manager.save_state(state["run_id"], ws)
-        return {"stage": ws.stage, "error": ws.error}
+        try:
+            ws = redis_manager.load_state(state["run_id"])
+            ws = search.search(ws)
+            if not ws.papers:
+                ws.error = "Search returned zero papers from all sources after retries."
+            redis_manager.save_state(state["run_id"], ws)
+            return {"stage": ws.stage, "error": ws.error}
+        except Exception as exc:
+            logger.error(f"Search Agent: Fatal error | error={exc}")
+            return {"stage": "search_failed", "error": str(exc)}
 
     def summarize_node(state: GraphState) -> dict:
         logger.info("Summarization Agent: Generating LLM summaries via Ollama")
-        ws = redis_manager.load_state(state["run_id"])
-        ws = summarization.summarize_all(ws)
-        redis_manager.save_state(state["run_id"], ws)
-        return {"stage": ws.stage, "error": ws.error}
+        try:
+            ws = redis_manager.load_state(state["run_id"])
+            ws = summarization.summarize_all(ws)
+            redis_manager.save_state(state["run_id"], ws)
+            return {"stage": ws.stage, "error": ws.error}
+        except Exception as exc:
+            logger.error(f"Summarization Agent: Fatal error | error={exc}")
+            return {"stage": "summarize_failed", "error": str(exc)}
 
     def citation_node(state: GraphState) -> dict:
         logger.info("Citation Agent: Compiling BibTeX citations")
-        ws = redis_manager.load_state(state["run_id"])
-        ws = citation.compile_citations(ws)
-        redis_manager.save_state(state["run_id"], ws)
-        return {"stage": ws.stage, "error": ws.error}
+        try:
+            ws = redis_manager.load_state(state["run_id"])
+            ws = citation.compile_citations(ws)
+            redis_manager.save_state(state["run_id"], ws)
+            return {"stage": ws.stage, "error": ws.error}
+        except Exception as exc:
+            logger.error(f"Citation Agent: Fatal error | error={exc}")
+            return {"stage": "citation_failed", "error": str(exc)}
 
     def report_node(state: GraphState) -> dict:
         logger.info("Report: Generating output files")
@@ -64,19 +84,44 @@ def build_workflow(redis_manager: RedisManager):
         redis_manager.save_state(state["run_id"], ws)
         return {"stage": "complete", "error": None}
 
+    def error_node(state: GraphState) -> dict:
+        logger.error(
+            f"Workflow routed to error state | stage={state.get('stage')} | error={state.get('error')}"
+        )
+        return {"stage": "error"}
+
+    def _route_or_error(next_node: str):
+        def _route(state: GraphState) -> str:
+            return "error" if state.get("error") else next_node
+        return _route
+
     graph = StateGraph(GraphState)
     graph.add_node("supervisor", supervisor_node)
     graph.add_node("search", search_node)
     graph.add_node("summarize", summarize_node)
     graph.add_node("citation", citation_node)
     graph.add_node("report", report_node)
+    graph.add_node("error_node", error_node)
 
     graph.set_entry_point("supervisor")
     graph.add_edge("supervisor", "search")
-    graph.add_edge("search", "summarize")
-    graph.add_edge("summarize", "citation")
-    graph.add_edge("citation", "report")
+    graph.add_conditional_edges(
+        "search",
+        _route_or_error("summarize"),
+        {"summarize": "summarize", "error": "error_node"},
+    )
+    graph.add_conditional_edges(
+        "summarize",
+        _route_or_error("citation"),
+        {"citation": "citation", "error": "error_node"},
+    )
+    graph.add_conditional_edges(
+        "citation",
+        _route_or_error("report"),
+        {"report": "report", "error": "error_node"},
+    )
     graph.add_edge("report", END)
+    graph.add_edge("error_node", END)
 
     return graph.compile()
 
@@ -107,20 +152,34 @@ def _write_markdown(state: WorkflowState) -> None:
             f.write(f"**Authors:** {authors_str}{year_str}")
             if paper.doi:
                 f.write(f" | **DOI:** {paper.doi}")
-            source_label = paper.source.replace("_", " ").title()
+            source_label = _SOURCE_LABELS.get(
+                paper.source, paper.source.replace("_", " ").title()
+            )
             f.write(f" | **Source:** {source_label}\n\n")
             f.write("**Summary:**\n\n")
             summary_text = paper.summary if paper.summary else paper.abstract
             f.write(f"{summary_text}\n\n")
             f.write("---\n\n")
+
+        # Topic-aware conclusion derived from the actual papers retrieved
         f.write("## Conclusion\n\n")
+        paper_count = len(state.papers)
+        source_counts: dict[str, int] = {}
+        for p in state.papers:
+            source_counts[p.source] = source_counts.get(p.source, 0) + 1
+        years = [p.year for p in state.papers if p.year]
+        year_range = f" spanning {min(years)} to {max(years)}" if years else ""
+        source_summary = " and ".join(
+            f"{count} from {_SOURCE_LABELS.get(src, src)}"
+            for src, count in source_counts.items()
+        )
         f.write(
-            f"The works surveyed here represent the current state of research in {state.topic}. "
-            f"Recurring themes include scalable neural architectures, "
-            f"data-efficient training, and rigorous empirical evaluation. "
-            f"Open challenges in the field include robustness under distribution shift, "
-            f"computational efficiency at inference time, and interpretability of model decisions. "
-            f"The papers cited above provide a solid foundation for advancing these directions.\n\n"
+            f"This review examined {paper_count} papers on {state.topic}{year_range}, "
+            f"retrieved from {source_summary}. "
+            f"The surveyed work reflects a field that is actively advancing on multiple fronts, "
+            f"with contributions spanning theoretical foundations and applied systems. "
+            f"The papers cited above provide entry points into the primary literature "
+            f"and form a foundation for researchers entering this area.\n\n"
         )
         f.write("---\n\n")
         f.write("## References\n\n")

@@ -36,18 +36,24 @@ class CitationAgent:
         return state
 
     def _generate_key(self, paper: Paper) -> str:
-        first_author = (
-            re.sub(r"[^a-z0-9]", "", paper.authors[0].split()[-1].lower())
-            if paper.authors
-            else "unknown"
-        )
+        if paper.authors:
+            raw = paper.authors[0]
+            # Handle "Last, First" format from some API responses
+            if "," in raw:
+                family = raw.split(",")[0].strip()
+            else:
+                # "First Last" — take the last whitespace-separated token
+                family = raw.strip().split()[-1]
+            family_clean = re.sub(r"[^a-z0-9]", "", family.lower())
+        else:
+            family_clean = "unknown"
         year = str(paper.year) if paper.year else "0000"
         first_word = (
             re.sub(r"[^a-z]", "", paper.title.lower().split()[0])
             if paper.title
             else "paper"
         )
-        return f"{first_author}{year}{first_word}"
+        return f"{family_clean}{year}{first_word}"
 
     def _fetch_bibtex(self, paper: Paper) -> str:
         if paper.doi:
@@ -89,14 +95,16 @@ class CitationAgent:
         title = paper.title or "Untitled"
         year = str(paper.year) if paper.year else "2000"
         journal = "arXiv preprint" if paper.source == "arxiv" else "Manuscript"
-        lines = [f"@article{{{key},"]
-        lines.append(f"  title = {{{title}}},")
-        lines.append(f"  author = {{{authors}}},")
-        lines.append(f"  journal = {{{journal}}},")
-        lines.append(f"  year = {{{year}}},")
+        fields: list[tuple[str, str]] = [
+            ("title", title),
+            ("author", authors),
+            ("journal", journal),
+            ("year", year),
+        ]
         if paper.arxiv_id:
-            lines.append(f"  note = {{arXiv:{paper.arxiv_id}}},")
+            fields.append(("note", f"arXiv:{paper.arxiv_id}"))
         if paper.doi:
-            lines.append(f"  doi = {{{paper.doi}}},")
-        lines.append("}")
-        return "\n".join(lines)
+            fields.append(("doi", paper.doi))
+        # Join with commas between fields — no trailing comma before closing brace
+        field_lines = ",\n".join(f"  {k} = {{{v}}}" for k, v in fields)
+        return f"@article{{{key},\n{field_lines}\n}}"

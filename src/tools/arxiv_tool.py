@@ -20,7 +20,7 @@ class ArxivTool:
     @retry(
         wait=wait_exponential(multiplier=1, min=2, max=10),
         stop=stop_after_attempt(3),
-        retry=retry_if_exception_type(Exception),
+        retry=retry_if_exception_type((arxiv.HTTPError, ConnectionError)),
         reraise=True,
     )
     def search(self, query: str) -> List[Paper]:

@@ -18,3 +18,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD python -c "import redis, os; redis.Redis(host=os.getenv('REDIS_HOST','redis'), port=int(os.getenv('REDIS_PORT','6379'))).ping()" || exit 1
 
 ENTRYPOINT ["python", "main.py"]
+CMD ["--help"]

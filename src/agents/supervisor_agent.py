@@ -9,11 +9,10 @@ class SupervisorAgent:
     def plan(self, state: WorkflowState) -> WorkflowState:
         logger.info(f"Supervisor: Planning workflow | topic={state.topic!r}")
         topic = state.topic.strip()
+        # Two queries: direct topic and a survey framing — both consumed by SearchAgent
         queries = [
             topic,
             f"survey {topic}",
-            f"{topic} methods techniques",
-            f"{topic} recent advances",
         ]
         state.search_queries = queries
         state.stage = "planned"

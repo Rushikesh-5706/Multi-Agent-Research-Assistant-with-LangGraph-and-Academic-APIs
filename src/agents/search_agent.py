@@ -23,8 +23,7 @@ class SearchAgent:
         seen_titles: set[str] = set()
         papers: List[Paper] = []
 
-        # Use first two queries to keep result volume manageable.
-        for query in state.search_queries[:2]:
+        for query in state.search_queries:
             try:
                 arxiv_papers = self._arxiv.search(query)
                 for p in arxiv_papers:

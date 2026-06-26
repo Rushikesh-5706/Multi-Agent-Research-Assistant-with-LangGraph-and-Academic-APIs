@@ -14,7 +14,7 @@ from tenacity import (
 from src.models.schemas import Paper, WorkflowState
 from src.tools.pdf_parser import PDFParser
 
-_OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://ollama:11434")
+_OLLAMA_DEFAULT_HOST = "http://ollama:11434"
 _MODEL = "llama3.1:8b"
 _TIMEOUT_SECONDS = 120.0
 
@@ -82,11 +82,12 @@ class SummarizationAgent:
             "stream": False,
             "options": {"temperature": 0.3, "num_predict": 350},
         }
+        ollama_host = os.getenv("OLLAMA_HOST", _OLLAMA_DEFAULT_HOST)
         logger.debug(
-            f"Calling Ollama | model={_MODEL} | endpoint={_OLLAMA_HOST}/api/generate"
+            f"Calling Ollama | model={_MODEL} | endpoint={ollama_host}/api/generate"
         )
         with httpx.Client(timeout=_TIMEOUT_SECONDS) as client:
-            response = client.post(f"{_OLLAMA_HOST}/api/generate", json=payload)
+            response = client.post(f"{ollama_host}/api/generate", json=payload)
             response.raise_for_status()
         result = response.json()
         summary = result.get("response", "").strip()

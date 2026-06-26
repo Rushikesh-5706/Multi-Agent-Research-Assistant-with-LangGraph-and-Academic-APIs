@@ -8,38 +8,76 @@ The full stack runs in Docker. No cloud API keys are required for the default co
 
 ## System Architecture
 
-```
-Agent Workflow (LangGraph StateGraph)
-
-┌─────────────────┐     ┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐     ┌──────────────────┐
-│ Supervisor Agent│────▶│  Search Agent   │────▶│ Summarization Agent  │────▶│ Citation Agent  │────▶│ Report Generator │
-│                 │     │                 │     │                      │     │                 │     │                  │
-│ Generates search│     │ Queries arXiv   │     │ Downloads PDFs       │     │ Fetches BibTeX  │     │ Writes .md       │
-│ queries from    │     │ and Semantic    │     │ Calls Ollama         │     │ via Crossref    │     │ and .bib files   │
-│ input topic     │     │ Scholar APIs    │     │ llama3.1:8b          │     │ Constructs      │     │                  │
-│                 │     │                 │     │                      │     │ fallback entries│     │                  │
-└─────────────────┘     └─────────────────┘     └──────────────────────┘     └─────────────────┘     └──────────────────┘
-         │                       │                          │                          │                        │
-         └───────────────────────┴──────────────────────────┴──────────────────────────┴──── Redis ────────────┘
-                                              State persisted and read at each transition
-```
-
-Docker Compose Services
+### Agent Workflow (LangGraph StateGraph)
 
 ```
-┌────────────────────────────────────────────────────┐
-│                Docker Compose Network               │
-│                                                    │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────┐ │
-│  │     app      │  │    redis     │  │  ollama  │ │
-│  │              │  │              │  │          │ │
-│  │  LangGraph   │◀─│  7.2-alpine  │  │ llama3.1 │ │
-│  │  workflow    │  │  Port 6379   │  │  :8b     │ │
-│  │              │─▶│  State store │  │ Port     │ │
-│  │              │  └──────────────┘  │ 11434    │ │
-│  │              │─────────────────────▶          │ │
-│  └──────────────┘                  └──────────┘ │
-└────────────────────────────────────────────────────┘
++----------------------------+
+|      Supervisor Agent      |
+|  Generates 4 search        |
+|  queries from input topic  |
++-------------+--------------+
+              |
+              v
++----------------------------+
+|       Search Agent         |
+|  Queries arXiv API and     |
+|  Semantic Scholar API      |
++-------------+--------------+
+              |
+              v
++----------------------------+
+|    Summarization Agent     |
+|  Downloads PDFs, calls     |
+|  Ollama llama3.1:8b        |
+|  Falls back to abstract    |
++-------------+--------------+
+              |
+              v
++----------------------------+
+|      Citation Agent        |
+|  Fetches BibTeX via        |
+|  Crossref DOI endpoint     |
+|  Constructs fallback entry |
++-------------+--------------+
+              |
+              v
++----------------------------+
+|     Report Generator       |
+|  Writes literature_review  |
+|  .md and references.bib    |
++----------------------------+
+
+At every node transition, the full WorkflowState is read from
+Redis at the start and written back on completion.
+
+  Redis key:  research:{run_id}:state
+  TTL:        24 hours
+```
+
+### Docker Compose Services
+
+```
++----------------------------------------------------------+
+|                  Docker Compose Network                  |
+|                                                          |
+|  +------------------+                                   |
+|  |       app        |                                   |
+|  |                  |---reads/writes state---> redis    |
+|  |  LangGraph       |                                   |
+|  |  workflow        |---LLM inference---------> ollama  |
+|  |  (this image)    |                                   |
+|  +------------------+                                   |
+|                                                          |
+|  +------------------+   +----------------------------+  |
+|  |      redis       |   |          ollama            |  |
+|  |  7.2-alpine      |   |  llama3.1:8b               |  |
+|  |  port 6379       |   |  port 11434                |  |
+|  |  state store     |   |  volume: ollama_data       |  |
+|  +------------------+   +----------------------------+  |
+|                                                          |
+|  Startup order enforced by Docker health checks:         |
+|  redis (healthy) --> ollama (healthy) --> app            |
++----------------------------------------------------------+
 ```
 
 ---
@@ -48,45 +86,45 @@ Docker Compose Services
 
 ```
 .
-├── main.py                          CLI entrypoint (click)
-├── Dockerfile
-├── docker-compose.yml
-├── requirements.txt
-├── .env.example
-├── output/
-│   ├── literature_review.md         Generated on each run
-│   ├── references.bib               Generated on each run
-│   └── agent_run.log                Written by loguru during run
-└── src/
-    ├── agents/
-    │   ├── supervisor_agent.py      Generates search queries from topic
-    │   ├── search_agent.py          Queries arXiv and Semantic Scholar
-    │   ├── summarization_agent.py   PDF parsing and Ollama LLM calls
-    │   └── citation_agent.py        BibTeX via Crossref or constructed
-    ├── graph/
-    │   └── workflow.py              LangGraph StateGraph definition
-    ├── models/
-    │   └── schemas.py               Pydantic models: Paper, WorkflowState
-    ├── state/
-    │   └── redis_manager.py         Redis serialization layer
-    ├── tools/
-    │   ├── arxiv_tool.py            arXiv Python library wrapper
-    │   ├── semantic_scholar_tool.py Semantic Scholar REST API wrapper
-    │   └── pdf_parser.py            pdfplumber-based extraction
-    └── utils/
-        └── logger.py                loguru configuration
++-- main.py                          CLI entrypoint (click)
++-- Dockerfile
++-- docker-compose.yml
++-- requirements.txt
++-- .env.example
++-- output/
+|   +-- literature_review.md         Generated on each run
+|   +-- references.bib               Generated on each run
+|   +-- agent_run.log                Written by loguru during run
++-- src/
+    +-- agents/
+    |   +-- supervisor_agent.py      Generates search queries from topic
+    |   +-- search_agent.py          Queries arXiv and Semantic Scholar
+    |   +-- summarization_agent.py   PDF parsing and Ollama LLM calls
+    |   +-- citation_agent.py        BibTeX via Crossref or constructed
+    +-- graph/
+    |   +-- workflow.py              LangGraph StateGraph definition
+    +-- models/
+    |   +-- schemas.py               Pydantic models: Paper, WorkflowState
+    +-- state/
+    |   +-- redis_manager.py         Redis serialization layer
+    +-- tools/
+    |   +-- arxiv_tool.py            arXiv Python library wrapper
+    |   +-- semantic_scholar_tool.py Semantic Scholar REST API wrapper
+    |   +-- pdf_parser.py            pdfplumber-based extraction
+    +-- utils/
+        +-- logger.py                loguru configuration
 ```
 
 ---
 
 ## Prerequisites
 
-| Requirement | Version |
-|-------------|---------|
-| Docker Engine | 24+ |
-| Docker Compose | v2 |
-| Available disk space | 10 GB (Ollama model) |
-| Internet access | Required for API queries and model download |
+| Requirement          | Version                                     |
+|----------------------|---------------------------------------------|
+| Docker Engine        | 24+                                         |
+| Docker Compose       | v2                                          |
+| Available disk space | 10 GB (Ollama model)                        |
+| Internet access      | Required for API queries and model download |
 
 ---
 
@@ -145,15 +183,15 @@ All three containers should show `(healthy)` before running the application.
 
 All output is written to `./output/` on the host machine via a Docker volume mount.
 
-| File | Description |
-|------|-------------|
-| `literature_review.md` | Markdown report with Introduction, Related Work, Conclusion, and References sections |
-| `references.bib` | BibTeX file containing one `@article` entry per paper |
-| `agent_run.log` | Structured log of the full agent execution with timestamps |
+| File                   | Description                                                                           |
+|------------------------|---------------------------------------------------------------------------------------|
+| `literature_review.md` | Markdown report with Introduction, Related Work, Conclusion, and References sections  |
+| `references.bib`       | BibTeX file containing one `@article` entry per paper                                 |
+| `agent_run.log`        | Structured log of the full agent execution with timestamps                            |
 
 **Report structure**
 
-```markdown
+```
 # Literature Review: [topic]
 ## Introduction
 ## Related Work
@@ -168,24 +206,24 @@ All output is written to `./output/` on the host machine via a Docker volume mou
 
 ## Environment Variables
 
-| Variable | Required | Default | Purpose |
-|----------|----------|---------|---------|
-| `REDIS_HOST` | Yes | `redis` | Redis service hostname |
-| `REDIS_PORT` | Yes | `6379` | Redis service port |
-| `OLLAMA_HOST` | No | `http://ollama:11434` | Ollama inference endpoint |
-| `SEMANTIC_SCHOLAR_API_KEY` | No | — | Improves Semantic Scholar rate limits |
-| `ANTHROPIC_API_KEY` | No | — | Not used in default config |
+| Variable                    | Required | Default                 | Purpose                                |
+|-----------------------------|----------|-------------------------|----------------------------------------|
+| `REDIS_HOST`                | Yes      | `redis`                 | Redis service hostname                 |
+| `REDIS_PORT`                | Yes      | `6379`                  | Redis service port                     |
+| `OLLAMA_HOST`               | No       | `http://ollama:11434`   | Ollama inference endpoint              |
+| `SEMANTIC_SCHOLAR_API_KEY`  | No       | --                      | Improves Semantic Scholar rate limits  |
+| `ANTHROPIC_API_KEY`         | No       | --                      | Not used in default config             |
 
 ---
 
 ## Agent Design
 
-| Agent | Responsibility | Input | Output | External Calls |
-|-------|---------------|-------|--------|----------------|
-| Supervisor | Plans search strategy | Topic string | List of search queries | None |
-| Search | Retrieves academic papers | Query list | List of Paper objects | arXiv API, Semantic Scholar API |
-| Summarization | Generates paper summaries | Paper list | Paper list with summaries | Ollama /api/generate, PDF URLs |
-| Citation | Compiles BibTeX references | Paper list | Paper list with BibTeX | Crossref DOI endpoint |
+| Agent         | Responsibility             | Input              | Output                       | External Calls                          |
+|---------------|----------------------------|--------------------|------------------------------|-----------------------------------------|
+| Supervisor    | Plans search strategy      | Topic string       | List of search queries       | None                                    |
+| Search        | Retrieves academic papers  | Query list         | List of Paper objects        | arXiv API, Semantic Scholar API         |
+| Summarization | Generates paper summaries  | Paper list         | Paper list with summaries    | Ollama /api/generate, PDF URLs          |
+| Citation      | Compiles BibTeX references | Paper list         | Paper list with BibTeX       | Crossref DOI endpoint                   |
 
 ---
 
@@ -201,13 +239,13 @@ Redis key format: `research:{run_id}:state` with a 24-hour TTL.
 
 All external API calls use `tenacity` retry logic with exponential backoff. Specific behavior by failure type:
 
-| Failure | Behavior |
-|---------|---------|
-| arXiv API error | Retried 3 times; logged as error if exhausted; other sources continue |
-| Semantic Scholar API error | Retried 3 times; logged as error if exhausted |
-| PDF download failure | Falls back to abstract-level summarization; warning logged |
-| Ollama timeout or HTTP error | Retried 3 times; falls back to raw abstract if exhausted |
-| Crossref BibTeX unavailable | BibTeX constructed from paper metadata |
+| Failure                       | Behavior                                                                |
+|-------------------------------|-------------------------------------------------------------------------|
+| arXiv API error               | Retried 3 times; logged as error if exhausted; other sources continue   |
+| Semantic Scholar API error    | Retried 3 times; logged as error if exhausted                           |
+| PDF download failure          | Falls back to abstract-level summarization; warning logged              |
+| Ollama timeout or HTTP error  | Retried 3 times; falls back to raw abstract if exhausted                |
+| Crossref BibTeX unavailable   | BibTeX constructed from paper metadata                                  |
 
 ---
 

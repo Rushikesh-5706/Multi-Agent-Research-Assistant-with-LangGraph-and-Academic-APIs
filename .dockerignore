@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.DS_Store
+.venv
+venv
+README.md
+output/

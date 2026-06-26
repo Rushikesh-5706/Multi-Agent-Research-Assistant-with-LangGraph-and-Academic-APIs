@@ -46,6 +46,35 @@ class PDFParser:
             logger.warning(f"PDF extraction failed | url={pdf_url} | reason={exc}")
             return None
 
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=8),
+        stop=stop_after_attempt(2),
+        retry=retry_if_exception_type(requests.exceptions.RequestException),
+        reraise=False,
+    )
+    def find_open_access_url(self, doi: str) -> Optional[str]:
+        """Query Unpaywall for an open-access PDF URL for the given DOI."""
+        logger.debug(f"Querying Unpaywall for open-access PDF | doi={doi}")
+        try:
+            url = f"https://api.unpaywall.org/v2/{doi}"
+            params = {"email": "research-agent@example.com"}
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            oa_location = data.get("best_oa_location")
+            if oa_location:
+                pdf_url = oa_location.get("url_for_pdf")
+                if pdf_url:
+                    logger.debug(
+                        f"Unpaywall found open-access PDF | doi={doi} | url={pdf_url}"
+                    )
+                    return pdf_url
+        except requests.exceptions.RequestException:
+            raise
+        except Exception as exc:
+            logger.warning(f"Unpaywall lookup failed | doi={doi} | reason={exc}")
+        return None
+
     def _extract_from_path(self, path: str) -> Optional[str]:
         try:
             with pdfplumber.open(path) as pdf:

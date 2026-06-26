@@ -58,14 +58,28 @@ class SummarizationAgent:
             return paper.abstract
 
     def _get_source_text(self, paper: Paper) -> str:
+        # Attempt primary PDF URL
         if paper.pdf_url:
             pdf_text = self._pdf_parser.extract_text_from_url(paper.pdf_url)
             if pdf_text:
-                logger.debug(f"Using PDF text | paper={paper.title!r}")
+                logger.debug(f"Using primary PDF | paper={paper.title!r}")
                 return pdf_text
-            logger.warning(
-                f"PDF inaccessible, falling back to abstract | paper={paper.title!r}"
-            )
+            logger.warning(f"Primary PDF failed | paper={paper.title!r}")
+
+        # Attempt Unpaywall open-access fallback if DOI is available
+        if paper.doi:
+            oa_url = self._pdf_parser.find_open_access_url(paper.doi)
+            if oa_url and oa_url != paper.pdf_url:
+                pdf_text = self._pdf_parser.extract_text_from_url(oa_url)
+                if pdf_text:
+                    logger.debug(
+                        f"Using Unpaywall PDF | paper={paper.title!r} | url={oa_url}"
+                    )
+                    return pdf_text
+            logger.warning(f"Unpaywall fallback failed | paper={paper.title!r}")
+
+        # Final fallback: raw abstract from API response
+        logger.warning(f"Using abstract as source text | paper={paper.title!r}")
         return paper.abstract
 
     @retry(

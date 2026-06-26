@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: research_agent_app
+    depends_on:
+      redis:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - OLLAMA_HOST=http://ollama:11434
+      - SEMANTIC_SCHOLAR_API_KEY=${SEMANTIC_SCHOLAR_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./output:/app/output
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis, os; redis.Redis(host=os.getenv('REDIS_HOST','redis'), port=int(os.getenv('REDIS_PORT','6379'))).ping()"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    command: /bin/sh -c "ollama serve & sleep 5 && ollama pull llama3.1:8b && wait"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  ollama_data:

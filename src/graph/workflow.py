@@ -136,7 +136,7 @@ def _write_markdown(state: WorkflowState) -> None:
         f.write(
             f"This literature review examines recent research on {state.topic}. "
             f"Papers were retrieved from arXiv and Semantic Scholar. "
-            f"Each paper was processed using a locally hosted language model (Ollama llama3.1:8b) "
+            f"Each {state.topic} paper was processed using a locally hosted language model (Ollama llama3.1:8b) "
             f"to extract its core contribution, methodology, and results. "
             f"The review maps the current research landscape and identifies recurring themes "
             f"and open problems in the field.\n\n"

@@ -13,7 +13,7 @@ The full stack runs in Docker. No cloud API keys are required for the default co
 ```
 +----------------------------+
 |      Supervisor Agent      |
-|  Generates 4 search        |
+|  Generates 2 search        |
 |  queries from input topic  |
 +-------------+--------------+
               |

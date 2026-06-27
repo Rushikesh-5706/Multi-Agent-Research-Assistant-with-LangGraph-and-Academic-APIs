@@ -70,3 +70,13 @@ def test_build_workflow_compiles():
     mock_redis.load_state.return_value = WorkflowState(run_id="r1", topic="test")
     workflow = build_workflow(mock_redis)
     assert workflow is not None
+
+def test_workflow_error_routing():
+    mock_redis = MagicMock()
+    ws = WorkflowState(run_id="r1", topic="test", error="Initial error")
+    mock_redis.load_state.return_value = ws
+    
+    workflow = build_workflow(mock_redis)
+    result = workflow.invoke({"run_id": "r1", "topic": "test", "stage": "init", "error": "Initial error"})
+    
+    assert result["stage"] == "error"

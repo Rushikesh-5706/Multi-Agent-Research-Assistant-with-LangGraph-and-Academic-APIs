@@ -60,20 +60,20 @@ Redis at the start and written back on completion.
 +----------------------------------------------------------+
 |                  Docker Compose Network                  |
 |                                                          |
-|  +------------------+                                   |
-|  |       app        |                                   |
-|  |                  |---reads/writes state---> redis    |
-|  |  LangGraph       |                                   |
-|  |  workflow        |---LLM inference---------> ollama  |
-|  |  (this image)    |                                   |
-|  +------------------+                                   |
+|  +------------------+                                    |
+|  |       app        |                                    |
+|  |                  |---reads/writes state---> redis     |
+|  |  LangGraph       |                                    |
+|  |  workflow        |---LLM inference---------> ollama   |
+|  |  (this image)    |                                    |
+|  +------------------+                                    |
 |                                                          |
-|  +------------------+   +----------------------------+  |
-|  |      redis       |   |          ollama            |  |
-|  |  7.2-alpine      |   |  llama3.1:8b               |  |
-|  |  port 6379       |   |  port 11434                |  |
-|  |  state store     |   |  volume: ollama_data       |  |
-|  +------------------+   +----------------------------+  |
+|  +------------------+   +----------------------------+   |
+|  |      redis       |   |          ollama            |   |
+|  |  7.2-alpine      |   |  llama3.1:8b               |   |
+|  |  port 6379       |   |  port 11434                |   |
+|  |  state store     |   |  volume: ollama_data       |   |
+|  +------------------+   +----------------------------+   |
 |                                                          |
 |  Startup order enforced by Docker health checks:         |
 |  redis (healthy) --> ollama (healthy) --> app            |
